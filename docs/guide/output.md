@@ -91,6 +91,11 @@ The following packaged datasets are generated using [the annual Uniform Crime Re
 * `ucr_index_crime`: Index crime (violent and property) offenses and arrests
 * `ucr_school_indicent`: School incident offenses
 
+::: warning NOTE
+The ISP's Uniform Crime Report data files for each year often come with corrected values for the previous year's data. The current Web Dataset Maintenance Tool also uses the corrected values for its data outputs whenever possible.
+:::
+
+
 The following package dataset is generated using the Illinois State Police data obtained via email.
 
 * `drug_seizure_submission`: Drug Seizures and Submissions
