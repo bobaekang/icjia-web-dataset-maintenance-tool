@@ -41,7 +41,7 @@ def simplecount_auto_input(source_group_input, source_input):
         return 'failure'
     else:
         if wd.ui.prompt_for_confirmation('the temporary output is as expected'):
-            updated = wd.simplecount.finalize_update()
+            updated = wd.simplecount.finalize_update(source)
             if not updated:
                 print('ERROR: Cannot finalize the update!')
                 return 'failure'

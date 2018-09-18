@@ -188,17 +188,17 @@ def _transform_idoc(df):
         
         c_nc = df['admtypo3'] == 1
         c_tv = df['admtypo3'] == 2
-        c_pers = df['offtype'] == 1
-        c_prop = df['offtype'] == 2
-        c_drug = df['offtype'] == 3
-        c_sex = df['offtype'] == 4
-        c_other = df['offtype'] == 7
+        c_pers = df['offtype2'] == 1 # df['offtype'] == 1
+        c_prop = df['offtype2'] == 2 # df['offtype'] == 2
+        c_sex = df['offtype2'] == 4 # df['offtype'] == 4
+        c_drug = df['offtype2'].isin([3.1, 3.2, 3.3, 3.4, 3.5, 3.6]) # df['offtype'] == 3
+        c_other = df['offtype2'].isin([0, 3, 5, 7]) # df['offtype'] == 7
         c_viol = df['offtype'] == 1
         c_male = df['sex'] == 'M'
         c_female = ~c_male
 
         c_first2 = [c_nc, c_tv]
-        c_others = [c_pers, c_prop, c_drug, c_sex, c_other, c_viol, c_male, c_female]
+        c_others = [c_pers, c_prop, c_sex, c_drug, c_other, c_viol, c_male, c_female]
         
         def helper(c, indicator_id, first2):
             df['fk_simplecount_indicator'] = indicator_id
@@ -243,7 +243,7 @@ def _fetch_idoc_data(year=None):
 
         database = 'PrisonMain'
         tbl = 'PrisonAdmits'
-        cols = 'FiscalYr, COMCNTY, SEX, ADMTYPO3, OFFTYPE, OFFTYPE3'
+        cols = 'FiscalYr, COMCNTY, SEX, ADMTYPO3, OFFTYPE, OFFTYPE2'
         condition = f'FiscalYr = {year}'
 
         df = _fetch_from_ms_sql_server(database, tbl, cols, condition)
@@ -349,29 +349,29 @@ def _fetch_idjj_data(year=None):
         raise
 
 # automatic updating of UCR data
-def _transform_ucr_data(raw, which):
+def _transform_ucr_data(df, which):
     """Transform a raw UCR table into a proper format."""
     try:
-        raw['county'] = raw['county'].str.lower().str.replace(' ', '')
+        df['county'] = df['county'].str.lower().str.replace(' ', '')
 
         if which == 'school':
-            raw = raw.drop('agency_name', axis=1).groupby('county', as_index=False).sum()
+            df = df.drop('agency_name', axis=1).groupby('county', as_index=False).sum()
             school_cols = ['ch', 'csa', 'aggbatt', 'batt', 'aggasslt', 'assault', 'intimidate']
-            raw['school'] = raw[school_cols].sum(axis=1)
-            return raw[['county', 'school']]
+            df['school'] = df[school_cols].sum(axis=1)
+            return df[['county', 'school']]
         elif which == 'index':
-            raw = raw.drop(['aindex', 'arate'], axis=1)
-            raw = pd.concat(
+            df = df.drop(['aindex', 'arate'], axis=1)
+            df = pd.concat(
                 [
-                    raw.loc[:, 'county'],
-                    raw.loc[:, 'ch':'ahtserve'],
-                    raw.loc[:, 'acca':'ameth']
+                    df.loc[:, ['year', 'county']],
+                    df.loc[:, 'ch':'ahtserve'],
+                    df.loc[:, 'acca':'ameth']
                 ],
                 axis=1
             )
-            return raw.iloc[:102, ]
+            return df # df.iloc[:102, ]
         else:
-            return raw.iloc[:102, ]
+            return df # df.iloc[:102, ]
     except:
         raise
 
@@ -390,14 +390,28 @@ def _fetch_ucr_data_single(year, which):
         elif which == 'school':
             filename = f'SchoolIncidents_{yy}_{yy_pre}.xlsx'
 
-        url = f'http://www.isp.state.il.us/docs/cii/cii{yy}/ds/{filename}'
-        
-        exclude_pre = lambda x: not re.search('\d', x)
-        rename_col = lambda x: x[:-2].lower() if x[-2:] == str(yy) else x.lower()
-        raw = pd.read_excel(url).rename(columns=rename_col)
-        raw = raw.loc[:,raw.columns.map(exclude_pre)]
-        
-        return _transform_ucr_data(raw, which)
+        url = f'http://www.isp.state.il.us/docs/cii/cii{yy}/ds/{filename}'      
+        df = pd.read_excel(url)
+        select_cols = lambda x: not re.search('\d', x)
+
+        if which == 'school':
+            df = df.rename(columns=lambda x: x[:-2].lower() if x[-2:] == str(year)[2:] else x.lower())
+            df = df.loc[:, df.columns.map(select_cols)]
+        else:
+            def helper(df,year):
+                rename_cols = lambda x: x[:-2].lower() if x[-2:] == str(year)[2:] else x.lower()
+            
+                return (
+                    df
+                    .rename(columns=rename_cols)
+                    .loc[:, df.rename(columns=rename_cols).columns.map(select_cols)]
+                    .assign(year=year)
+                    .iloc[:102, ]
+                )
+
+            df = pd.concat([helper(df, year), helper(df, year - 1)])
+
+        return _transform_ucr_data(df, which)
     except XLRDError:
         raise ValueError("WARNING: Uniform Crime Report data is up to date.")
     except:
@@ -438,16 +452,22 @@ def _fetch_ucr_data(year=None):
             .fillna(0)
         )
 
-        combined['year'] = year
-        combined['fk_simplecount_county'] = pd.Series(range(1,103))
+        county_id = database.fetch_table('County') \
+            .loc[:101, ['id', 'county_name']] \
+            .sort_values(by='county_name')
+        county_id['county_name'] = county_id['county_name'] \
+            .str.lower() \
+            .str.replace(' ', '')
+        county_id.columns = ['fk_simplecount_county', 'county']
 
         pivoted = pd.melt(
-                combined,
+                combined.merge(county_id, how='left'),
                 id_vars=['year', 'county', 'fk_simplecount_county'],
                 var_name='fk_simplecount_indicator',
                 value_name='value'
             ) \
-            .replace({'fk_simplecount_indicator': _UCR_INDICATOR_DICT})
+            .replace({'fk_simplecount_indicator': _UCR_INDICATOR_DICT}) \
+            .sort_values(by=['year', 'fk_simplecount_indicator', 'fk_simplecount_county'])
         pivoted['value'] = pd.to_numeric(pivoted['value'], errors='coerce').fillna(0)
 
         return pivoted[_SIMPLECOUNT_COLUMNS]
@@ -735,7 +755,25 @@ def fetch_input_and_create_temp(source=None, auto=False):
         print(e)
         return False
 
-def finalize_update():
+def _remove_ucr_uncorrected_vals():
+    """Remove the uncorrected UCR values from the simplecount table."""
+    global _CONN
+    global _UCR_INDICATOR_DICT
+
+    try:
+        c = _CONN.cursor()
+        c.execute(f'SELECT max(year) FROM SimpleCount WHERE fk_simplecount_indicator = 1100')
+        year = c.fetchone()[0]
+        c.close()
+        
+        ucr_indicator_str = ', '.join([str(x) for x in _UCR_INDICATOR_DICT.values()])
+        sql = f'DELETE FROM SimpleCount WHERE year = {year} AND fk_simplecount_indicator IN ({ucr_indicator_str})'
+        database.execute_simple_sql(sql)
+        print("NOTE: Uncorrected UCR data values are removed from the database prior to inserting the corrected values.")
+    except:
+        raise
+
+def finalize_update(source=None):
     """Fianlize the updating of the ``SimpleCount`` table.
 
     This function calls private functions in the module to complete the
@@ -743,10 +781,16 @@ def finalize_update():
     to the master table in the SQL database and 2) deleting the temporary table
     from the database as well as `@/temp`.
 
+    Args:
+        source (str): Data source if automatiically fetching data
+
     Returns:
         bool: True for success, False otherwise.
     """
     try:
+        if source == 'ucr':
+            _remove_ucr_uncorrected_vals()
+        
         _add_to_master()
         _delete_temp()
         return True
