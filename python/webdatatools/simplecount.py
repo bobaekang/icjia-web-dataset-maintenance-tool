@@ -449,7 +449,7 @@ def _fetch_ucr_data(year=None):
             .merge(domestic, how='left')
             .merge(hate, how='left')
             .merge(school, how='left')
-            .fillna(0)
+            # .fillna(0)
         )
 
         county_id = database.fetch_table('County') \
@@ -468,7 +468,7 @@ def _fetch_ucr_data(year=None):
             ) \
             .replace({'fk_simplecount_indicator': _UCR_INDICATOR_DICT}) \
             .sort_values(by=['year', 'fk_simplecount_indicator', 'fk_simplecount_county'])
-        pivoted['value'] = pd.to_numeric(pivoted['value'], errors='coerce').fillna(0)
+        pivoted['value'] = pd.to_numeric(pivoted['value'], errors='coerce') #.fillna(0)
 
         return pivoted[_SIMPLECOUNT_COLUMNS]
     except:
